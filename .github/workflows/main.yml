@@ -1,0 +1,62 @@
+name: Build WebRTC AAR
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Free disk space
+      run: |
+        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
+        df -h
+
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install -y git python3 python3-pip openjdk-17-jdk unzip curl build-essential
+
+    - name: Clone depot_tools
+      run: |
+        git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
+        echo "${PWD}/depot_tools" >> $GITHUB_PATH
+
+    - name: Fetch WebRTC (shallow)
+      run: |
+        mkdir webrtc-checkout
+        cd webrtc-checkout
+        fetch --nohooks webrtc_android
+        cd src
+
+        # Configure shallow sync
+        echo '{ "target_os": ["android"] }' > ../.gclient
+        gclient sync --no-history --shallow
+
+    - name: Build AARs (arm64, x86_64, armeabi-v7a)
+      run: |
+        cd webrtc-checkout/src
+
+        for arch in arm64 x86_64 arm; do
+          case $arch in
+            arm64) out_dir="arm64" ;;
+            x86_64) out_dir="x86_64" ;;
+            arm) out_dir="armeabi-v7a" ;;
+          esac
+
+          gn gen out/$out_dir --args="target_os=\"android\" target_cpu=\"$arch\" is_debug=false rtc_include_tests=false"
+          ninja -C out/$out_dir sdk
+        done
+
+    - name: Upload AAR artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: webrtc-aar
+        path: |
+          webrtc-checkout/src/out/arm64/lib.java/sdk/android/libwebrtc.aar
+          webrtc-checkout/src/out/x86_64/lib.java/sdk/android/libwebrtc.aar
+          webrtc-checkout/src/out/armeabi-v7a/lib.java/sdk/android/libwebrtc.aar
