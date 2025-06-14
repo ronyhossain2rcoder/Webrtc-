@@ -8,11 +8,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Free disk space
-      run: |
-        sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android /opt/hostedtoolcache
-        df -h
-
     - name: Checkout repository
       uses: actions/checkout@v3
 
@@ -24,33 +19,36 @@ jobs:
     - name: Clone depot_tools
       run: |
         git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git
-        echo "${PWD}/depot_tools" >> $GITHUB_PATH
 
-    - name: Fetch WebRTC (shallow)
+    - name: Set PATH for depot_tools
+      run: |
+        echo "${{ github.workspace }}/depot_tools" >> $GITHUB_PATH
+
+    - name: Fetch WebRTC Android source
       run: |
         mkdir webrtc-checkout
         cd webrtc-checkout
+        export PATH="${{ github.workspace }}/depot_tools:$PATH"
         fetch --nohooks webrtc_android
         cd src
-
-        # Configure shallow sync
-        echo '{ "target_os": ["android"] }' > ../.gclient
-        gclient sync --no-history --shallow
+        gclient sync
 
     - name: Build AARs (arm64, x86_64, armeabi-v7a)
       run: |
         cd webrtc-checkout/src
+        export PATH="${{ github.workspace }}/depot_tools:$PATH"
 
-        for arch in arm64 x86_64 arm; do
-          case $arch in
-            arm64) out_dir="arm64" ;;
-            x86_64) out_dir="x86_64" ;;
-            arm) out_dir="armeabi-v7a" ;;
-          esac
+        # ARM64
+        gn gen out/arm64 --args='target_os="android" target_cpu="arm64" is_debug=false rtc_include_tests=false'
+        ninja -C out/arm64 sdk
 
-          gn gen out/$out_dir --args="target_os=\"android\" target_cpu=\"$arch\" is_debug=false rtc_include_tests=false"
-          ninja -C out/$out_dir sdk
-        done
+        # x86_64
+        gn gen out/x86_64 --args='target_os="android" target_cpu="x86_64" is_debug=false rtc_include_tests=false'
+        ninja -C out/x86_64 sdk
+
+        # armeabi-v7a
+        gn gen out/armeabi-v7a --args='target_os="android" target_cpu="arm" is_debug=false rtc_include_tests=false'
+        ninja -C out/armeabi-v7a sdk
 
     - name: Upload AAR artifacts
       uses: actions/upload-artifact@v4
